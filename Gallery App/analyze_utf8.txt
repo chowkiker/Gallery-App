@@ -1,0 +1,26 @@
+﻿Analyzing Gallery App...                                        
+
+   info - 'background' is deprecated and shouldn't be used. Use surface instead. This feature was deprecated after v3.18.0-0.1.pre - lib\core\theme\app_theme.dart:34:9 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\albums\albums_screen.dart:108:74 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\albums\albums_screen.dart:153:98 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\gallery\organize_screen.dart:182:43 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\gallery\organize_screen.dart:339:58 - deprecated_member_use
+   info - 'scale' is deprecated and shouldn't be used. Use scaleByVector3, scaleByVector4, or scaleByDouble instead - lib\features\gallery\organize_screen.dart:402:40 - deprecated_member_use
+   info - Use 'const' with the constructor to improve performance - lib\features\gallery\organize_screen.dart:418:15 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance - lib\features\gallery\organize_screen.dart:418:73 - prefer_const_constructors
+   info - Use 'const' for final variables initialized to a constant value - lib\features\gallery\widgets\donut_chart.dart:92:5 - prefer_const_declarations
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\gallery\widgets\donut_chart.dart:109:38 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\gallery\widgets\rating_filter.dart:31:50 - deprecated_member_use
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\features\settings\settings_screen.dart:122:15 - deprecated_member_use
+warning - The declaration '_hexToColor' isn't referenced - lib\features\swipe_viewer\swipe_viewer_screen.dart:115:9 - unused_element
+   info - 'translate' is deprecated and shouldn't be used. Use translateByVector3, translateByVector4, or translateByDouble instead - lib\features\swipe_viewer\swipe_viewer_screen.dart:133:17 - deprecated_member_use
+   info - 'scale' is deprecated and shouldn't be used. Use scaleByVector3, scaleByVector4, or scaleByDouble instead - lib\features\swipe_viewer\swipe_viewer_screen.dart:135:17 - deprecated_member_use
+   info - 'translate' is deprecated and shouldn't be used. Use translateByVector3, translateByVector4, or translateByDouble instead - lib\features\swipe_viewer\swipe_viewer_screen.dart:137:17 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\swipe_viewer\swipe_viewer_screen.dart:424:136 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\swipe_viewer\swipe_viewer_screen.dart:522:44 - deprecated_member_use
+   info - Use interpolation to compose strings and values - lib\providers.dart:65:11 - prefer_interpolation_to_compose_strings
+warning - The value of the field '_doneCount' isn't used - lib\shared\widgets\move_copy_tray.dart:37:7 - unused_field
+   info - 'scale' is deprecated and shouldn't be used. Use scaleByVector3, scaleByVector4, or scaleByDouble instead - lib\shared\widgets\move_copy_tray.dart:163:60 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\shared\widgets\move_copy_tray.dart:241:60 - deprecated_member_use
+  error - The name 'MyApp' isn't a class - test\widget_test.dart:16:35 - creation_with_non_type
+
