@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../shared/models/photo.dart';
 import 'dart:math' as math;
 
 class GroupPieChart extends StatelessWidget {
-  final Map<String, List<Photo>> groupedPhotos;
+  /// Maps each group label (e.g. "March 2024") to its photo count.
+  final Map<String, int> groupedPhotos;
   final String groupBy;
 
   const GroupPieChart({
@@ -18,7 +18,7 @@ class GroupPieChart extends StatelessWidget {
     if (groupedPhotos.isEmpty) return const SizedBox.shrink();
 
     final keys = groupedPhotos.keys.toList();
-    final total = groupedPhotos.values.fold(0, (sum, list) => sum + list.length);
+    final total = groupedPhotos.values.fold(0, (sum, count) => sum + count);
     if (total == 0) return const SizedBox.shrink();
 
     final colors = [
@@ -35,7 +35,7 @@ class GroupPieChart extends StatelessWidget {
     List<PieSegment> segments = [];
     for (int i = 0; i < keys.length; i++) {
       final k = keys[i];
-      final count = groupedPhotos[k]!.length;
+      final count = groupedPhotos[k]!;
       segments.add(PieSegment(
         label: k,
         count: count,

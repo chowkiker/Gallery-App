@@ -58,7 +58,18 @@ class OrganizeScreen extends StatefulWidget {
 class _OrganizeScreenState extends State<OrganizeScreen> {
   final Set<String> _selected = {};
   bool _selMode = false;
-  String _groupBy = 'Month';
+  final ValueNotifier<String> _groupByNotifier = ValueNotifier('Month');
+
+  @override
+  void dispose() {
+    _groupByNotifier.dispose();
+    super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+  }
 
   @override
   void didUpdateWidget(OrganizeScreen oldWidget) {
@@ -70,26 +81,45 @@ class _OrganizeScreenState extends State<OrganizeScreen> {
     }
   }
 
+  Future<AppFolder?> pickFolderAndLoadImages() async {
+    // Placeholder to allow integration of file_picker or native directory picker.
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Folder picker not yet implemented')),
+    );
+    return null;
+  }
+
   void _cancelSelection() =>
       setState(() { _selMode = false; _selected.clear(); });
 
-  Map<String, List<Photo>> _groupPhotos() {
+  /// Groups [widget.photos] by the current mode.
+  Map<String, List<Photo>> _groupAssets(String groupByMode) {
     final monthFmt = DateFormat('MMMM yyyy');
     final yearFmt  = DateFormat('yyyy');
+    final dayFmt   = DateFormat('MMM dd yyyy');
     final grouped  = <String, List<Photo>>{};
 
-    for (final p in widget.photos) {
-      String key;
-      final dt = p.asset?.createDateTime;
-      if (dt != null) {
-        key = _groupBy == 'Month' ? monthFmt.format(dt)
-            : _groupBy == 'Year'  ? yearFmt.format(dt)
-            : p.date;
+    for (final photo in widget.photos) {
+      DateTime dt;
+      if (photo.asset != null) {
+        dt = photo.asset!.createDateTime;
       } else {
-        key = p.date;
+        try {
+          dt = dayFmt.parse(photo.date);
+        } catch (_) {
+          dt = DateTime.now();
+        }
       }
-      (grouped[key] ??= []).add(p);
+
+      final String key = groupByMode == 'Month'
+          ? monthFmt.format(dt)
+          : groupByMode == 'Year'
+              ? yearFmt.format(dt)
+              : dayFmt.format(dt);
+      (grouped[key] ??= []).add(photo);
     }
+    
+    print("Grouped months: ${grouped.keys}");
     return grouped;
   }
 
@@ -123,8 +153,6 @@ class _OrganizeScreenState extends State<OrganizeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final grouped = _groupPhotos();
-    final sortedKeys = grouped.keys.toList();
     final trayPhotos = _selMode && _selected.isNotEmpty
         ? widget.photos.where((p) => _selected.contains(p.id)).toList()
         : <Photo>[];
@@ -157,134 +185,171 @@ class _OrganizeScreenState extends State<OrganizeScreen> {
               activeFolder: widget.activeFolder ?? 'Camera',
               onSelectFolder: widget.onSelectFolder,
             ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              child: GestureDetector(
+                onTap: () async {
+                  final folder = await pickFolderAndLoadImages();
+                  if (folder != null) {
+                    widget.onAddFolder(folder); // add to provider
+                  }
+                },
+                child: const Chip(
+                  label: Text("+ Browse 📁", style: TextStyle(fontWeight: FontWeight.w700)),
+                  backgroundColor: AppTheme.primaryBg,
+                  side: BorderSide.none,
+                ),
+              ),
+            ),
             // ── Scrollable body ────────────────────────────────────────────
             Expanded(
-              child: CustomScrollView(
-                slivers: [
-                  // Storage + Pie chart
-                  SliverToBoxAdapter(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        StorageBar(photos: widget.photos),
-                        GroupPieChart(groupedPhotos: grouped, groupBy: _groupBy),
-                        const SizedBox(height: 8),
-                        // Group-by switcher
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          child: Container(
-                            decoration: BoxDecoration(color: AppTheme.primaryBg, borderRadius: BorderRadius.circular(14)),
-                            child: Row(
-                              children: ['Date', 'Month', 'Year'].map((mode) {
-                                final active = _groupBy == mode;
-                                return Expanded(
-                                  child: GestureDetector(
-                                    onTap: () => setState(() => _groupBy = mode),
-                                    child: AnimatedContainer(
-                                      duration: const Duration(milliseconds: 200),
-                                      padding: const EdgeInsets.symmetric(vertical: 9),
-                                      decoration: BoxDecoration(
-                                        color: active ? AppTheme.primary : Colors.transparent,
-                                        borderRadius: BorderRadius.circular(14),
-                                      ),
-                                      alignment: Alignment.center,
-                                      child: Text(mode, style: TextStyle(fontSize: 12, fontWeight: active ? FontWeight.w800 : FontWeight.w600, color: active ? Colors.white : AppTheme.primary)),
-                                    ),
+              child: ValueListenableBuilder<String>(
+                valueListenable: _groupByNotifier,
+                builder: (context, groupByMode, child) {
+                  final grouped = _groupAssets(groupByMode);
+                  final sortedKeys = grouped.keys.toList();
+
+                  return ListView.builder(
+                    itemCount: widget.photos.isEmpty ? 2 : sortedKeys.length + 2,
+                    itemBuilder: (context, idx) {
+                      if (idx == 0) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              StorageBar(photos: widget.photos),
+                              GroupPieChart(
+                                groupedPhotos: grouped.map((k, v) => MapEntry(k, v.length)),
+                                groupBy: groupByMode,
+                              ),
+                              const SizedBox(height: 8),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 20),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.primaryBg, 
+                                    borderRadius: BorderRadius.circular(14),
                                   ),
-                                );
-                              }).toList(),
+                                  child: Row(
+                                    children: const ['Date', 'Month', 'Year'].map((mode) {
+                                      final active = groupByMode == mode;
+                                      return Expanded(
+                                        child: GestureDetector(
+                                          onTap: () => _groupByNotifier.value = mode,
+                                          child: AnimatedContainer(
+                                            duration: const Duration(milliseconds: 200),
+                                            padding: const EdgeInsets.symmetric(vertical: 9),
+                                            decoration: BoxDecoration(
+                                              color: active ? AppTheme.primary : Colors.transparent,
+                                              borderRadius: BorderRadius.circular(14),
+                                            ),
+                                            alignment: Alignment.center,
+                                            child: Text(
+                                              mode, 
+                                              style: TextStyle(
+                                                fontSize: 12, 
+                                                fontWeight: active ? FontWeight.w800 : FontWeight.w600, 
+                                                color: active ? Colors.white : AppTheme.primary,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+
+                      if (widget.photos.isEmpty) {
+                        return const Padding(
+                          padding: EdgeInsets.only(top: 80),
+                          child: Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.photo_library_outlined, size: 64, color: AppTheme.textMuted),
+                                SizedBox(height: 16),
+                                Text('No photos found in this folder', style: TextStyle(fontSize: 15, color: AppTheme.textMuted)),
+                              ],
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 16),
-                      ],
-                    ),
-                  ),
-                  // ── Horizontal timeline ─────────────────────────────────
-                  if (widget.photos.isEmpty)
-                    const SliverFillRemaining(
-                      child: Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.photo_library_outlined, size: 64, color: AppTheme.textMuted),
-                            SizedBox(height: 16),
-                            Text('No photos found in this folder', style: TextStyle(fontSize: 15, color: AppTheme.textMuted)),
-                          ],
-                        ),
-                      ),
-                    )
-                  else ...[
-                    // ── Compact list of groups ──────────────────────────────
-                    ...sortedKeys.asMap().entries.map((entry) {
-                      final idx = entry.key;
-                      final key = entry.value;
-                      final groupPhotos = grouped[key]!;
+                        );
+                      }
 
-                      final colors = [
+                      if (idx == sortedKeys.length + 1) {
+                        return const SizedBox(height: 120);
+                      }
+
+                      final mapIdx = idx - 1;
+                      final key = sortedKeys[mapIdx];
+                      final groupAssets = grouped[key]!;
+
+                      const colors = [
                         AppTheme.primary,
                         AppTheme.accent,
                         AppTheme.success,
                         AppTheme.warn,
-                        const Color(0xFF8B5CF6),
-                        const Color(0xFFF43F5E),
-                        const Color(0xFF14B8A6),
-                        const Color(0xFFF97316),
+                        Color(0xFF8B5CF6),
+                        Color(0xFFF43F5E),
+                        Color(0xFF14B8A6),
+                        Color(0xFFF97316),
                       ];
-                      final dotColor = colors[idx % colors.length];
-                      final thumb = groupPhotos.firstOrNull;
+                      final dotColor = colors[mapIdx % colors.length];
+                      final thumbPhoto = groupAssets.firstOrNull;
 
-                      return SliverToBoxAdapter(
-                        child: InkWell(
-                          onTap: () => widget.onOpenTimeline(key, _groupBy),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 12,
-                                  height: 12,
-                                  decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+                      return InkWell(
+                        onTap: () => widget.onOpenTimeline(key, groupByMode),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 12,
+                                height: 12,
+                                decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+                              ),
+                              const SizedBox(width: 16),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: SizedBox(
+                                  width: 44,
+                                  height: 44,
+                                  child: thumbPhoto?.asset != null
+                                      ? AssetEntityImage(
+                                          thumbPhoto!.asset!,
+                                          isOriginal: false,
+                                          thumbnailSize: const ThumbnailSize(200, 200),
+                                          fit: BoxFit.cover,
+                                          gaplessPlayback: true,
+                                        )
+                                      : _mockThumb('?'),
                                 ),
-                                const SizedBox(width: 16),
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: SizedBox(
-                                    width: 44,
-                                    height: 44,
-                                    child: thumb?.asset != null
-                                        ? AssetEntityImage(
-                                            thumb!.asset!,
-                                            isOriginal: false,
-                                            thumbnailSize: const ThumbnailSize(100, 100),
-                                            fit: BoxFit.cover,
-                                            gaplessPlayback: true,
-                                          )
-                                        : _mockThumb(thumb?.label ?? '?'),
-                                  ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Text(
+                                  key,
+                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.text),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: Text(
-                                    key,
-                                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.text),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                Text(
-                                  '${groupPhotos.length} photos',
-                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.textMuted),
-                                ),
-                              ],
-                            ),
+                              ),
+                              Text(
+                                '${groupAssets.length} photos',
+                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.textMuted),
+                              ),
+                            ],
                           ),
                         ),
                       );
-                    }),
-                    const SliverToBoxAdapter(child: SizedBox(height: 120)),
-                  ],
-                ],
+                    },
+                  );
+                },
               ),
             ),
           ],

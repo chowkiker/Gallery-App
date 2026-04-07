@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../shared/models/queue_action.dart';
 
 class QueuePanel extends StatelessWidget {
-  final List<QueueAction> deleteQueue;
-  final List<QueueAction> moveQueue;
-  final List<QueueAction> copyQueue;
+  /// Photo IDs queued for deletion.
+  final Set<String> deleteQueue;
+
+  /// Maps photoId → targetFolder for pending moves.
+  final Map<String, String> moveQueue;
+
+  /// Maps photoId → targetFolder for pending copies.
+  final Map<String, String> copyQueue;
+
   final VoidCallback onCancel;
   final VoidCallback onApply;
 
@@ -19,6 +24,16 @@ class QueuePanel extends StatelessWidget {
   });
 
   void _showReview(BuildContext context) {
+    // Group move/copy entries by target folder for a readable summary.
+    final moveByFolder = <String, int>{};
+    for (final folder in moveQueue.values) {
+      moveByFolder[folder] = (moveByFolder[folder] ?? 0) + 1;
+    }
+    final copyByFolder = <String, int>{};
+    for (final folder in copyQueue.values) {
+      copyByFolder[folder] = (copyByFolder[folder] ?? 0) + 1;
+    }
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -46,16 +61,16 @@ class QueuePanel extends StatelessWidget {
               ),
               const SizedBox(height: 24),
               if (deleteQueue.isNotEmpty) ...[
-                _buildActionRow("🗑", "${_countIds(deleteQueue)} items to Delete", AppTheme.dangerBg, AppTheme.danger),
+                _buildActionRow("🗑", "${deleteQueue.length} items to Delete", AppTheme.dangerBg, AppTheme.danger),
                 const SizedBox(height: 12),
               ],
-              ...moveQueue.map((act) => Padding(
+              ...moveByFolder.entries.map((e) => Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: _buildActionRow("📁", "${act.photoIds.length} items to Move → ${act.targetFolder}", AppTheme.primaryBg, AppTheme.primary),
+                child: _buildActionRow("📁", "${e.value} items to Move → ${e.key}", AppTheme.primaryBg, AppTheme.primary),
               )),
-              ...copyQueue.map((act) => Padding(
+              ...copyByFolder.entries.map((e) => Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: _buildActionRow("📋", "${act.photoIds.length} items to Copy → ${act.targetFolder}", AppTheme.successBg, AppTheme.success),
+                child: _buildActionRow("📋", "${e.value} items to Copy → ${e.key}", AppTheme.successBg, AppTheme.success),
               )),
               const SizedBox(height: 24),
               ElevatedButton(
@@ -74,15 +89,13 @@ class QueuePanel extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               TextButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                },
+                onPressed: () => Navigator.pop(ctx),
                 style: TextButton.styleFrom(
                   foregroundColor: AppTheme.textSub,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
                 child: const Text("Cancel", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, fontFamily: AppTheme.fontFamily)),
-              )
+              ),
             ],
           ),
         );
@@ -104,18 +117,11 @@ class QueuePanel extends StatelessWidget {
     );
   }
 
-  int _countIds(List<QueueAction> queue) {
-    int sum = 0;
-    for (var act in queue) {
-      sum += act.photoIds.length;
-    }
-    return sum;
-  }
-
   @override
   Widget build(BuildContext context) {
-    final delCnt = _countIds(deleteQueue);
-    if (delCnt == 0 && moveQueue.isEmpty && copyQueue.isEmpty) return const SizedBox.shrink();
+    if (deleteQueue.isEmpty && moveQueue.isEmpty && copyQueue.isEmpty) {
+      return const SizedBox.shrink();
+    }
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
@@ -138,8 +144,8 @@ class QueuePanel extends StatelessWidget {
                 Wrap(
                   spacing: 7, runSpacing: 4,
                   children: [
-                    if (delCnt > 0)
-                      Text("🗑 $delCnt delete", style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: AppTheme.danger, fontFamily: AppTheme.fontFamily)),
+                    if (deleteQueue.isNotEmpty)
+                      Text("🗑 ${deleteQueue.length} delete", style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: AppTheme.danger, fontFamily: AppTheme.fontFamily)),
                     if (moveQueue.isNotEmpty)
                       Text("📁 ${moveQueue.length} move", style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: AppTheme.primary, fontFamily: AppTheme.fontFamily)),
                     if (copyQueue.isNotEmpty)

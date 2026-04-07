@@ -7,7 +7,6 @@ import 'package:photo_manager/photo_manager.dart';
 
 import 'shared/models/photo.dart';
 import 'shared/models/app_folder.dart';
-import 'shared/models/queue_action.dart';
 import 'services/media_scanner.dart';
 
 // ─── INIT / PERMISSION STATE ──────────────────────────────────────────────────
@@ -51,12 +50,11 @@ class InitNotifier extends Notifier<InitStatus> {
       (f) => f.name.toLowerCase().contains('camera') || f.system,
       orElse: () => root,
     );
-    ref.read(filterStateProvider.notifier).setFilter(folder: camera.name);
-
+    
     state = const InitStatus(isLoading: false, isReady: true);
 
-    // Progressive background load from the root (all-photos) path
-    ref.read(photosProvider.notifier).progressiveLoad(root);
+    // Set filter and load images for the selected folder
+    ref.read(filterStateProvider.notifier).setFilter(folder: camera.name);
   }
 }
 
@@ -68,18 +66,20 @@ class PhotosNotifier extends Notifier<List<Photo>> {
   @override
   List<Photo> build() => [];
 
-  Future<void> progressiveLoad(AppFolder root) async {
+  Future<void> loadFolderImages(AppFolder root) async {
     bool disposed = false;
     ref.onDispose(() => disposed = true);
-    int total = kIsWeb ? 120 : await root.path!.assetCountAsync;
-    const batchSize = 80;
-
-    for (int i = 0; i < total; i += batchSize) {
-      if (disposed) return;
-      final chunk = await MediaScannerService.loadPage(root, i, batchSize);
-      if (chunk.isEmpty) break;
-      state = [...state, ...chunk];
-      await Future.delayed(const Duration(milliseconds: 120));
+    
+    // clear old data
+    state = []; // Inherently acts as notifyListeners() in Riverpod
+    
+    // re-fetch images
+    final currentImages = await MediaScannerService.loadAll(root);
+    
+    if (!disposed) {
+      print("Loaded images: ${currentImages.length}");
+      // currentImages = new folder images
+      state = currentImages; // Triggers UI update
     }
   }
 
@@ -122,26 +122,41 @@ class FoldersNotifier extends Notifier<List<AppFolder>> {
 final foldersProvider = NotifierProvider<FoldersNotifier, List<AppFolder>>(() => FoldersNotifier());
 
 // ─── QUEUES ───────────────────────────────────────────────────────────────────
+//
+// Single source of truth for all pending photo actions.
+//
+// Flat collections are used so that the SAME photo can never be queued twice:
+//   deleteQueue  — Set<String>          : photo IDs to delete
+//   moveQueue    — Map<String, String>  : photoId → targetFolder
+//   copyQueue    — Map<String, String>  : photoId → targetFolder
+//
+// Adding the same ID a second time is a no-op for delete (Set),
+// and overwrites with the latest folder for move/copy (Map).
 
 class QueuesState {
-  final List<QueueAction> deleteQueue;
-  final List<QueueAction> moveQueue;
-  final List<QueueAction> copyQueue;
+  /// IDs of photos queued for deletion. A Set guarantees no duplicates.
+  final Set<String> deleteQueue;
+
+  /// Maps each photo ID to the folder it should be moved into.
+  /// A later addToMoveQueue call for the same ID simply overwrites the folder.
+  final Map<String, String> moveQueue;
+
+  /// Maps each photo ID to the folder it should be copied into.
+  final Map<String, String> copyQueue;
+
   const QueuesState({
-    this.deleteQueue = const [],
-    this.moveQueue = const [],
-    this.copyQueue = const [],
+    this.deleteQueue = const {},
+    this.moveQueue = const {},
+    this.copyQueue = const {},
   });
 
-  int get totalCount =>
-      deleteQueue.fold(0, (s, a) => s + a.photoIds.length) +
-      moveQueue.length +
-      copyQueue.length;
+  /// Total number of unique photo IDs across all queues.
+  int get totalCount => deleteQueue.length + moveQueue.length + copyQueue.length;
 
   QueuesState copyWith({
-    List<QueueAction>? deleteQueue,
-    List<QueueAction>? moveQueue,
-    List<QueueAction>? copyQueue,
+    Set<String>? deleteQueue,
+    Map<String, String>? moveQueue,
+    Map<String, String>? copyQueue,
   }) =>
       QueuesState(
         deleteQueue: deleteQueue ?? this.deleteQueue,
@@ -154,19 +169,33 @@ class QueueNotifier extends Notifier<QueuesState> {
   @override
   QueuesState build() => const QueuesState();
 
+  /// Adds [ids] to the delete queue. Already-queued IDs are silently skipped.
   void addToDeleteQueue(Set<String> ids) {
     HapticFeedback.lightImpact();
-    state = state.copyWith(deleteQueue: [...state.deleteQueue, QueueAction.delete(ids)]);
+    // Set.union returns a new Set; existing IDs are not duplicated.
+    state = state.copyWith(deleteQueue: {...state.deleteQueue, ...ids});
   }
 
+  /// Queues [ids] for a move to [folder].
+  /// If an ID was already queued for a move, its target folder is updated.
   void addToMoveQueue(Set<String> ids, String folder) {
     HapticFeedback.lightImpact();
-    state = state.copyWith(moveQueue: [...state.moveQueue, QueueAction.move(ids, folder)]);
+    final updated = Map<String, String>.from(state.moveQueue);
+    for (final id in ids) {
+      updated[id] = folder; // overwrites any previous entry for same id
+    }
+    state = state.copyWith(moveQueue: updated);
   }
 
+  /// Queues [ids] for a copy to [folder].
+  /// If an ID was already queued for a copy, its target folder is updated.
   void addToCopyQueue(Set<String> ids, String folder) {
     HapticFeedback.lightImpact();
-    state = state.copyWith(copyQueue: [...state.copyQueue, QueueAction.copy(ids, folder)]);
+    final updated = Map<String, String>.from(state.copyQueue);
+    for (final id in ids) {
+      updated[id] = folder;
+    }
+    state = state.copyWith(copyQueue: updated);
   }
 
   void cancelQueues() => state = const QueuesState();
@@ -180,14 +209,15 @@ class QueueNotifier extends Notifier<QueuesState> {
     final photos = ref.read(photosProvider.notifier);
 
     // ── Delete ──
-    for (final act in state.deleteQueue) {
+    final deleteIds = state.deleteQueue;
+    if (deleteIds.isNotEmpty) {
       try {
         if (!kIsWeb) {
           final perm = await PhotoManager.requestPermissionExtend();
           if (!perm.isAuth) throw Exception('Permission denied');
-          await PhotoManager.editor.deleteWithIds(act.photoIds.toList());
+          await PhotoManager.editor.deleteWithIds(deleteIds.toList());
         }
-        photos.deleteFromState(act.photoIds);
+        photos.deleteFromState(deleteIds);
       } catch (e) {
         debugPrint('Delete failed: $e');
         if (context.mounted) {
@@ -196,21 +226,25 @@ class QueueNotifier extends Notifier<QueuesState> {
       }
     }
 
-    // ── Move ──
-    for (final act in state.moveQueue) {
-      if (act.targetFolder == null) continue;
+    // ── Move ── group by target folder to minimise PhotoManager calls
+    final moveByFolder = <String, Set<String>>{};
+    for (final entry in state.moveQueue.entries) {
+      (moveByFolder[entry.value] ??= {}).add(entry.key);
+    }
+    for (final entry in moveByFolder.entries) {
+      final targetFolderName = entry.key;
+      final ids = entry.value;
       try {
         if (!kIsWeb) {
-          // Find AssetPathEntity for target folder
           final folders = ref.read(foldersProvider);
           final targetPath = folders
-              .where((f) => f.name == act.targetFolder && f.path != null)
+              .where((f) => f.name == targetFolderName && f.path != null)
               .map((f) => f.path!)
               .firstOrNull;
           if (targetPath != null) {
             final assets = ref
                 .read(photosProvider)
-                .where((p) => act.photoIds.contains(p.id) && p.asset != null)
+                .where((p) => ids.contains(p.id) && p.asset != null)
                 .map((p) => p.asset!)
                 .toList();
             // photo_manager 3.x: move = copy to destination + delete original
@@ -227,7 +261,7 @@ class QueueNotifier extends Notifier<QueuesState> {
             }
           }
         }
-        photos.moveInState(act.photoIds, act.targetFolder!);
+        photos.moveInState(ids, targetFolderName);
       } catch (e) {
         debugPrint('Move failed: $e');
         if (context.mounted) {
@@ -236,28 +270,34 @@ class QueueNotifier extends Notifier<QueuesState> {
       }
     }
 
-    // ── Copy ──
-    for (final act in state.copyQueue) {
-      if (act.targetFolder == null) continue;
+    // ── Copy ── group by target folder
+    final copyByFolder = <String, Set<String>>{};
+    for (final entry in state.copyQueue.entries) {
+      (copyByFolder[entry.value] ??= {}).add(entry.key);
+    }
+    for (final entry in copyByFolder.entries) {
+      final targetFolderName = entry.key;
+      final ids = entry.value;
       try {
         if (!kIsWeb) {
           final folders = ref.read(foldersProvider);
           final targetPath = folders
-              .where((f) => f.name == act.targetFolder && f.path != null)
+              .where((f) => f.name == targetFolderName && f.path != null)
               .map((f) => f.path!)
               .firstOrNull;
           if (targetPath != null) {
             final assets = ref
                 .read(photosProvider)
-                .where((p) => act.photoIds.contains(p.id) && p.asset != null)
+                .where((p) => ids.contains(p.id) && p.asset != null)
                 .map((p) => p.asset!)
                 .toList();
             for (final asset in assets) {
-              await PhotoManager.editor.copyAssetToPath(asset: asset, pathEntity: targetPath);
+              await PhotoManager.editor.copyAssetToPath(
+                asset: asset, pathEntity: targetPath);
             }
           }
         }
-        photos.copyInState(act.photoIds, act.targetFolder!);
+        photos.copyInState(ids, targetFolderName);
       } catch (e) {
         debugPrint('Copy failed: $e');
         if (context.mounted) {
@@ -304,12 +344,21 @@ class FilterStateNotifier extends Notifier<FilterStateData> {
     String? timelineFilter,
     String? timelineMode,
   }) {
+    final bool folderChanged = folder != null && folder != state.activeFolder;
+    
     state = FilterStateData(
       activeFolder: folder,
       ratingFilter: rating,
       timelineFilter: timelineFilter,
       timelineMode: timelineMode,
     );
+
+    if (folderChanged) {
+      final appFolder = ref.read(foldersProvider).where((f) => f.name == folder).firstOrNull;
+      if (appFolder != null) {
+        ref.read(photosProvider.notifier).loadFolderImages(appFolder);
+      }
+    }
   }
 
   void clearTimeline() {
@@ -375,9 +424,9 @@ final filteredPhotosProvider = Provider<List<Photo>>((ref) {
 
 final queuedPhotoIdsProvider = Provider<Set<String>>((ref) {
   final q = ref.watch(queueProvider);
-  final ids = <String>{};
-  for (final a in q.deleteQueue) ids.addAll(a.photoIds);
-  for (final a in q.moveQueue) ids.addAll(a.photoIds);
-  for (final a in q.copyQueue) ids.addAll(a.photoIds);
-  return ids;
+  return {
+    ...q.deleteQueue,
+    ...q.moveQueue.keys,
+    ...q.copyQueue.keys,
+  };
 });

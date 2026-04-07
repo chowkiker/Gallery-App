@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../shared/models/photo.dart';
-import '../../shared/models/queue_action.dart';
 
 class SettingsScreen extends StatefulWidget {
   final List<Photo> photos;
   final int gridCols;
   final ValueChanged<int> setGridCols;
-  final List<QueueAction> deleteQueue;
-  final List<QueueAction> moveQueue;
-  final List<QueueAction> copyQueue;
+  /// Photo IDs queued for deletion.
+  final Set<String> deleteQueue;
+  /// Maps photoId → target folder name for move operations.
+  final Map<String, String> moveQueue;
+  /// Maps photoId → target folder name for copy operations.
+  final Map<String, String> copyQueue;
 
   const SettingsScreen({
     super.key,
@@ -97,7 +99,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 // simple alert
                 showDialog(context: context, builder: (c) => AlertDialog(
                   title: const Text("Pending Actions"),
-                  content: Text("${widget.deleteQueue.length} delete, ${widget.moveQueue.length} move, ${widget.copyQueue.length} copy batches"),
+                  content: Text("${widget.deleteQueue.length} to delete · ${widget.moveQueue.length} to move · ${widget.copyQueue.length} to copy"),
                   actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text("OK"))],
                 ));
               },

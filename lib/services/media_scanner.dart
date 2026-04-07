@@ -6,59 +6,122 @@ import '../shared/models/app_folder.dart';
 import 'package:intl/intl.dart';
 
 class MediaScannerService {
+  // ─── Permission ────────────────────────────────────────────────────────────
+
+  /// Requests device media permissions via photo_manager.
+  /// Returns true when the app has read access to the gallery.
   static Future<bool> requestPermission() async {
     if (kIsWeb) return true;
     final PermissionState ps = await PhotoManager.requestPermissionExtend();
     return ps.isAuth || ps.hasAccess;
   }
 
-  static Future<List<AppFolder>> getFolders() async {
-    if (kIsWeb) {
-      return [
-        AppFolder(id: 'cam', name: 'Camera', system: false, path: null),
-        AppFolder(id: 'wa', name: 'WhatsApp', system: false, path: null),
-      ];
-    }
+  // ─── Album API (primary) ────────────────────────────────────────────────────
+
+  /// Returns all image/video albums found on the device.
+  ///
+  /// The list is sorted so the Camera roll is first.  If no album whose name
+  /// contains "camera" (case-insensitive) is found the first album in the list
+  /// returned by the OS is kept at position 0.
+  static Future<List<AssetPathEntity>> getAlbums() async {
+    if (kIsWeb) return [];
 
     final hasPerm = await requestPermission();
     if (!hasPerm) return [];
 
-    final List<AssetPathEntity> paths = await PhotoManager.getAssetPathList(
-      type: RequestType.common,
+    final List<AssetPathEntity> albums = await PhotoManager.getAssetPathList(
+      type: RequestType.image,
       hasAll: false,
       onlyAll: false,
     );
 
-    final List<AppFolder> folders = [];
-    for (var path in paths) {
-      folders.add(AppFolder(
-        id: path.id,
-        name: path.name.isNotEmpty ? path.name : "Folder",
-        system: path.isAll,
-        path: path,
-      ));
+    if (albums.isEmpty) return albums;
+
+    // Find a Camera album by a case-insensitive name match.
+    final cameraIndex = albums.indexWhere(
+      (a) => a.name.toLowerCase().contains('camera'),
+    );
+
+    if (cameraIndex > 0) {
+      // Move it to the front without mutating the original list.
+      final sorted = List<AssetPathEntity>.from(albums);
+      final cameraAlbum = sorted.removeAt(cameraIndex);
+      sorted.insert(0, cameraAlbum);
+      return sorted;
     }
-    return folders;
+
+    return albums;
   }
 
-  static Future<List<Photo>> loadPage(AppFolder folder, int start, int count) async {
-    if (kIsWeb) {
-      return _generateWebMocks(start, count);
+  /// Returns ALL assets from [album] without limit.
+  static Future<List<AssetEntity>> getPhotos(AssetPathEntity album) async {
+    if (kIsWeb) return [];
+    
+    final int assetCount = await album.assetCountAsync;
+    final List<AssetEntity> images = await album.getAssetListPaged(
+        page: 0,
+        size: assetCount, // full load
+    );
+
+    print("TOTAL IMAGES: ${images.length}");
+
+    return images;
+  }
+
+  // ─── Legacy AppFolder API (kept for backwards-compat) ──────────────────────
+
+  /// Wraps [getAlbums] and converts results into [AppFolder] objects that the
+  /// rest of the app currently uses.
+  static Future<List<AppFolder>> getFolders() async {
+    if (kIsWeb) return [];
+
+    final albums = await getAlbums();
+    final List<AppFolder> dynamicFolders = [];
+
+    for (var album in albums) {
+      final count = await album.assetCountAsync;
+      if (count > 0) {
+        dynamicFolders.add(AppFolder(
+          id: album.id,
+          name: album.name.isNotEmpty ? album.name : 'Folder',
+          system: album.isAll,
+          path: album,
+        ));
+      }
     }
 
+    return dynamicFolders;
+  }
+
+  /// Loads ALL [Photo] objects from [folder].
+  static Future<List<Photo>> loadAll(AppFolder folder) async {
+    if (kIsWeb) return _generateWebMocks();
     if (folder.path == null) return [];
 
-    final List<AssetEntity> assets = await folder.path!.getAssetListRange(start: start, end: start + count);
+    final List<AssetEntity> assets = await getPhotos(folder.path!);
+
+    return _assetEntitiesToPhotos(assets, folder.name);
+  }
+
+  // ─── Helpers ────────────────────────────────────────────────────────────────
+
+  static List<Photo> _assetEntitiesToPhotos(
+    List<AssetEntity> assets,
+    String defaultFolderName,
+  ) {
     final List<Photo> photos = [];
 
-    for (var asset in assets) {
+    for (final asset in assets) {
       final DateTime dt = asset.createDateTime;
-      double estimatedMB = (asset.width * asset.height) / 2000000.0;
+      double estimatedMB = (asset.width * asset.height) / 2_000_000.0;
       if (estimatedMB < 0.1) estimatedMB = 0.5;
-      
-      String fName = folder.name;
+
+      String fName = defaultFolderName;
       if (asset.relativePath != null) {
-        final parts = asset.relativePath!.split('/').where((s) => s.isNotEmpty).toList();
+        final parts = asset.relativePath!
+            .split('/')
+            .where((s) => s.isNotEmpty)
+            .toList();
         if (parts.isNotEmpty) fName = parts.last;
       }
 
@@ -81,36 +144,36 @@ class MediaScannerService {
 
   static String _formatSize(double estimatedMB) {
     if (estimatedMB >= 1024) {
-      return "${(estimatedMB / 1024).toStringAsFixed(1)} GB";
+      return '${(estimatedMB / 1024).toStringAsFixed(1)} GB';
     }
-    return "${estimatedMB.toStringAsFixed(1)} MB";
+    return '${estimatedMB.toStringAsFixed(1)} MB';
   }
 
-  static List<Photo> _generateWebMocks(int start, int count) {
-    final rnd = Random(start);
+  // ─── Web mock data (development only) ──────────────────────────────────────
+
+  static List<Photo> _generateWebMocks() {
+    final rnd = Random(0);
     final List<Photo> list = [];
     final now = DateTime.now();
-    
-    // limit max mock photos to 120
-    if (start >= 120) return [];
-    int limit = min(count, 120 - start);
 
-    for (int i = 0; i < limit; i++) {
-      int id = start + i;
-      final dt = now.subtract(Duration(days: rnd.nextInt(60), hours: rnd.nextInt(24)));
+    for (int i = 0; i < 120; i++) {
+      final int id = i;
+      final dt = now.subtract(
+        Duration(days: rnd.nextInt(60), hours: rnd.nextInt(24)),
+      );
       final sizeMB = rnd.nextDouble() * 5 + 1.2;
-      final folder = rnd.nextBool() ? "Camera" : "WhatsApp";
+
       list.add(Photo(
-        id: "mock_$id",
+        id: 'mock_$id',
         asset: null,
-        label: "IMG_$id.jpg",
+        label: 'IMG_$id.jpg',
         date: DateFormat('MMM dd yyyy').format(dt),
         time: DateFormat('hh:mm a').format(dt),
         size: _formatSize(sizeMB),
         sizeMB: sizeMB,
         type: 'photo',
         rating: rnd.nextBool() ? 5 : null,
-        folder: folder,
+        folder: 'WebMock',
       ));
     }
     return list;

@@ -13,7 +13,6 @@ import 'features/onboarding/permission_screen.dart';
 import 'shared/widgets/bottom_nav.dart';
 import 'shared/widgets/skeleton_loader.dart';
 import 'shared/models/app_folder.dart';
-import 'shared/models/queue_action.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -82,7 +81,7 @@ class AppShell extends HookConsumerWidget {
     final activeFolder  = filter.activeFolder;
     final ratingFilter  = filter.ratingFilter;
 
-    final pendingDeleteCount = _countIds(queues.deleteQueue);
+    final pendingDeleteCount = queues.deleteQueue.length;
     final totalPendingCount  = queues.totalCount;
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -299,8 +298,6 @@ class AppShell extends HookConsumerWidget {
     );
   }
 
-  int _countIds(List<QueueAction> queue) =>
-      queue.fold(0, (s, a) => s + a.photoIds.length);
 }
 
 // ── Local UI providers ────────────────────────────────────────────────────────
